@@ -1,4 +1,4 @@
-module github.com/wix-playground/govips
+module github.com/Airmotion/govips
 
 go 1.14
 
