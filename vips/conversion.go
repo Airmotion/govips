@@ -111,6 +111,10 @@ func vipsCopyImage(in *C.VipsImage) (*C.VipsImage, error) {
 	return out, nil
 }
 
+func vipsCopyImageMemory(in *C.VipsImage) (*C.VipsImage, error) {
+	return C.copy_image_memory(in), nil
+}
+
 // https://libvips.github.io/libvips/API/current/libvips-conversion.html#vips-embed
 func vipsEmbed(in *C.VipsImage, left, top, width, height int, extend ExtendStrategy) (*C.VipsImage, error) {
 	incOpCounter("embed")

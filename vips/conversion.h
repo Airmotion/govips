@@ -4,6 +4,7 @@
 #include <vips/vips.h>
 
 int copy_image(VipsImage *in, VipsImage **out);
+VipsImage* copy_image_memory(VipsImage *in);
 
 int embed_image(VipsImage *in, VipsImage **out, int left, int top, int width, int height, int extend, double r, double g, double b);
 

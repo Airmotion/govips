@@ -137,6 +137,15 @@ func (r *ImageRef) Copy() (*ImageRef, error) {
 	return newImageRef(out, r.format, r.buf), nil
 }
 
+func (r *ImageRef) CopyMemory() (*ImageRef, error) {
+	out, err := vipsCopyImageMemory(r.image)
+	if err != nil {
+		return nil, err
+	}
+
+	return newImageRef(out, r.format, r.buf), nil
+}
+
 func newImageRef(vipsImage *C.VipsImage, format ImageType, buf []byte) *ImageRef {
 	image := &ImageRef{
 		image:  vipsImage,
@@ -511,18 +520,8 @@ func (r *ImageRef) Flatten(backgroundColor *Color) error {
 }
 
 // Gaussblur executes the 'gaussblur' operation
-func (r *ImageRef) GaussianBlur(sigma float64) error {
-	out, err := vipsGaussianBlur(r.image, sigma)
-	if err != nil {
-		return err
-	}
-	r.setImage(out)
-	return nil
-}
-
-// Sharpen executes the 'sharpen' operation
-func (r *ImageRef) Sharpen(sigma float64, x1 float64, m2 float64, mode SharpenMode) error {
-	out, err := vipsSharpen(r.image, sigma, x1, m2, mode)
+func (r *ImageRef) GaussianBlur(sigma float64, precision Precision) error {
+	out, err := vipsGaussianBlur(r.image, sigma, precision)
 	if err != nil {
 		return err
 	}
