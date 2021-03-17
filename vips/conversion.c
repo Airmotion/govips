@@ -8,17 +8,9 @@ VipsImage* copy_image_memory(VipsImage *in) {
 	return vips_image_copy_memory(in);
 }
 
-int embed_image(VipsImage *in, VipsImage **out, int left, int top, int width, int height, int extend, double r, double g, double b) {
-	if (extend == VIPS_EXTEND_BACKGROUND) {
-		double background[3] = {r, g, b};
-		VipsArrayDouble *vipsBackground = vips_array_double_new(background, 3);
-
-		int code = vips_embed(in, out, left, top, width, height, "extend", extend, "background", vipsBackground, NULL);
-
-		vips_area_unref(VIPS_AREA(vipsBackground));
-		return code;
-	}
-	return vips_embed(in, out, left, top, width, height, "extend", extend, NULL);
+int embed_image(VipsImage *in, VipsImage **out, int left, int top, int width,
+                int height, int extend) {
+  return vips_embed(in, out, left, top, width, height, "extend", extend, NULL);
 }
 
 int flip_image(VipsImage *in, VipsImage **out, int direction) {
