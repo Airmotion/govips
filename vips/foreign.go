@@ -1,17 +1,19 @@
 package vips
 
-// #cgo pkg-config: vips
 // #include "foreign.h"
 import "C"
 import (
 	"bytes"
 	"encoding/xml"
-	"golang.org/x/image/bmp"
-	"golang.org/x/net/html/charset"
+	"fmt"
 	"image/png"
 	"math"
+	"os"
 	"runtime"
 	"unsafe"
+
+	"golang.org/x/image/bmp"
+	"golang.org/x/net/html/charset"
 )
 
 // ImageType represents an image type
@@ -45,6 +47,7 @@ var imageTypeExtensionMap = map[ImageType]string{
 	ImageTypeBMP:    ".bmp",
 }
 
+// ImageTypes defines the various image types supported by govips
 var ImageTypes = map[ImageType]string{
 	ImageTypeGIF:    "gif",
 	ImageTypeJPEG:   "jpeg",
@@ -58,6 +61,31 @@ var ImageTypes = map[ImageType]string{
 	ImageTypeBMP:    "bmp",
 }
 
+// TiffCompression represents method for compressing a tiff at export
+type TiffCompression int
+
+// TiffCompression enum
+const (
+	TiffCompressionNone     TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_NONE
+	TiffCompressionJpeg     TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_JPEG
+	TiffCompressionDeflate  TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_DEFLATE
+	TiffCompressionPackbits TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_PACKBITS
+	TiffCompressionFax4     TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_CCITTFAX4
+	TiffCompressionLzw      TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_LZW
+	TiffCompressionWebp     TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_WEBP
+	TiffCompressionZstd     TiffCompression = C.VIPS_FOREIGN_TIFF_COMPRESSION_ZSTD
+)
+
+// TiffPredictor represents method for compressing a tiff at export
+type TiffPredictor int
+
+// TiffPredictor enum
+const (
+	TiffPredictorNone       TiffPredictor = C.VIPS_FOREIGN_TIFF_PREDICTOR_NONE
+	TiffPredictorHorizontal TiffPredictor = C.VIPS_FOREIGN_TIFF_PREDICTOR_HORIZONTAL
+	TiffPredictorFloat      TiffPredictor = C.VIPS_FOREIGN_TIFF_PREDICTOR_FLOAT
+)
+
 // FileExt returns the canonical extension for the ImageType
 func (i ImageType) FileExt() string {
 	if ext, ok := imageTypeExtensionMap[i]; ok {
@@ -66,6 +94,7 @@ func (i ImageType) FileExt() string {
 	return ""
 }
 
+// IsTypeSupported checks whether given image type is supported by govips
 func IsTypeSupported(imageType ImageType) bool {
 	startupIfNeeded()
 
@@ -134,12 +163,14 @@ func isWEBP(buf []byte) bool {
 var ftyp = []byte("ftyp")
 var heic = []byte("heic")
 var mif1 = []byte("mif1")
+var msf1 = []byte("msf1")
 var avif = []byte("avif")
 
 func isHEIF(buf []byte) bool {
 	return bytes.Equal(buf[4:8], ftyp) && (bytes.Equal(buf[8:12], heic) ||
 		bytes.Equal(buf[8:12], avif) ||
-		bytes.Equal(buf[8:12], mif1))
+		bytes.Equal(buf[8:12], mif1) ||
+		bytes.Equal(buf[8:12], msf1))
 }
 
 var svg = []byte("<svg")
@@ -195,11 +226,16 @@ func vipsLoadFromBuffer(buf []byte) (*C.VipsImage, ImageType, error) {
 	}
 
 	if !IsTypeSupported(imageType) {
-		info("failed to understand image format size=%d", len(src))
+		govipsLog("govips", LogLevelInfo, fmt.Sprintf("failed to understand image format size=%d", len(src)))
 		return nil, ImageTypeUnknown, ErrUnsupportedImageFormat
 	}
 
-	if err := C.load_image_buffer(unsafe.Pointer(&src[0]), C.size_t(len(src)), C.int(imageType), &out); err != 0 {
+	var unlimitedSvgLoad C.gboolean = C.FALSE
+	if _, exists := os.LookupEnv("UNLIMITED_SVG_LOAD"); exists {
+		unlimitedSvgLoad = C.TRUE
+	}
+
+	if err := C.load_image_buffer(unsafe.Pointer(&src[0]), C.size_t(len(src)), C.int(imageType), unlimitedSvgLoad, &out); err != 0 {
 		return nil, ImageTypeUnknown, handleImageError(out)
 	}
 
@@ -221,85 +257,82 @@ func bmpToPNG(src []byte) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-func vipsSavePNGToBuffer(in *C.VipsImage, stripMetadata bool, compression int, interlaced bool) ([]byte, error) {
-	incOpCounter("save_png_buffer")
-	var ptr unsafe.Pointer
-	cLen := C.size_t(0)
-
-	strip := C.int(boolToInt(stripMetadata))
-	comp := C.int(compression)
-	inter := C.int(boolToInt(interlaced))
-
-	if err := C.save_png_buffer(in, &ptr, &cLen, strip, comp, inter); err != 0 {
-		return nil, handleSaveBufferError(ptr)
-	}
-
-	return toBuff(ptr, cLen), nil
-}
-
-func vipsSaveWebPToBuffer(in *C.VipsImage, stripMetadata bool, quality int, lossless bool, effort int) ([]byte, error) {
-	incOpCounter("save_webp_buffer")
-	var ptr unsafe.Pointer
-	cLen := C.size_t(0)
-
-	strip := C.int(boolToInt(stripMetadata))
-	qual := C.int(quality)
-	loss := C.int(boolToInt(lossless))
-	eff := C.int(effort)
-
-	if err := C.save_webp_buffer(in, &ptr, &cLen, strip, qual, loss, eff); err != 0 {
-		return nil, handleSaveBufferError(ptr)
-	}
-
-	return toBuff(ptr, cLen), nil
-}
-
-func vipsSaveTIFFToBuffer(in *C.VipsImage) ([]byte, error) {
-	incOpCounter("save_tiff_buffer")
-	var ptr unsafe.Pointer
-	cLen := C.size_t(0)
-
-	if err := C.save_tiff_buffer(in, &ptr, &cLen); err != 0 {
-		return nil, handleSaveBufferError(ptr)
-	}
-
-	return toBuff(ptr, cLen), nil
-}
-
-func vipsSaveHEIFToBuffer(in *C.VipsImage, quality int, lossless bool) ([]byte, error) {
-	incOpCounter("save_heif_buffer")
-	var ptr unsafe.Pointer
-	cLen := C.size_t(0)
-
-	qual := C.int(quality)
-	loss := C.int(boolToInt(lossless))
-
-	if err := C.save_heif_buffer(in, &ptr, &cLen, qual, loss); err != 0 {
-		return nil, handleSaveBufferError(ptr)
-	}
-
-	return toBuff(ptr, cLen), nil
-}
-
-func vipsSaveJPEGToBuffer(in *C.VipsImage, quality int, stripMetadata, interlaced bool) ([]byte, error) {
+func vipsSaveJPEGToBuffer(in *C.VipsImage, params JpegExportParams) ([]byte, error) {
 	incOpCounter("save_jpeg_buffer")
-	var ptr unsafe.Pointer
-	cLen := C.size_t(0)
 
-	strip := C.int(boolToInt(stripMetadata))
-	qual := C.int(quality)
-	inter := C.int(boolToInt(interlaced))
+	p := C.create_save_params(C.JPEG)
+	p.inputImage = in
+	p.stripMetadata = C.int(boolToInt(params.StripMetadata))
+	p.quality = C.int(params.Quality)
+	p.interlace = C.int(boolToInt(params.Interlace))
+	p.jpegOptimizeCoding = C.int(boolToInt(params.OptimizeCoding))
+	p.jpegSubsample = C.VipsForeignJpegSubsample(params.Subsampling)
 
-	if err := C.save_jpeg_buffer(in, &ptr, &cLen, strip, qual, inter); err != 0 {
-		return nil, handleSaveBufferError(ptr)
-	}
-
-	return toBuff(ptr, cLen), nil
+	return vipsSaveToBuffer(p)
 }
 
-func toBuff(ptr unsafe.Pointer, cLen C.size_t) []byte {
-	buf := C.GoBytes(ptr, C.int(cLen))
-	gFreePointer(ptr)
+func vipsSavePNGToBuffer(in *C.VipsImage, params PngExportParams) ([]byte, error) {
+	incOpCounter("save_png_buffer")
 
-	return buf
+	p := C.create_save_params(C.PNG)
+	p.inputImage = in
+	p.stripMetadata = C.int(boolToInt(params.StripMetadata))
+	p.interlace = C.int(boolToInt(params.Interlace))
+	p.pngCompression = C.int(params.Compression)
+
+	return vipsSaveToBuffer(p)
+}
+
+func vipsSaveWebPToBuffer(in *C.VipsImage, params WebpExportParams) ([]byte, error) {
+	incOpCounter("save_webp_buffer")
+
+	p := C.create_save_params(C.WEBP)
+	p.inputImage = in
+	p.stripMetadata = C.int(boolToInt(params.StripMetadata))
+	p.quality = C.int(params.Quality)
+	p.webpLossless = C.int(boolToInt(params.Lossless))
+	p.webpNearLossless = C.int(boolToInt(params.NearLossless))
+	p.webpReductionEffort = C.int(params.ReductionEffort)
+
+	if params.IccProfile != "" {
+		p.webpIccProfile = C.CString(params.IccProfile)
+		defer C.free(unsafe.Pointer(p.webpIccProfile))
+	}
+
+	return vipsSaveToBuffer(p)
+}
+
+func vipsSaveTIFFToBuffer(in *C.VipsImage, params TiffExportParams) ([]byte, error) {
+	incOpCounter("save_tiff_buffer")
+
+	p := C.create_save_params(C.TIFF)
+	p.inputImage = in
+	p.stripMetadata = C.int(boolToInt(params.StripMetadata))
+	p.quality = C.int(params.Quality)
+	p.tiffCompression = C.VipsForeignTiffCompression(params.Compression)
+
+	return vipsSaveToBuffer(p)
+}
+
+func vipsSaveHEIFToBuffer(in *C.VipsImage, params HeifExportParams) ([]byte, error) {
+	incOpCounter("save_heif_buffer")
+
+	p := C.create_save_params(C.HEIF)
+	p.inputImage = in
+	p.outputFormat = C.HEIF
+	p.quality = C.int(params.Quality)
+	p.heifLossless = C.int(boolToInt(params.Lossless))
+
+	return vipsSaveToBuffer(p)
+}
+
+func vipsSaveToBuffer(params C.struct_SaveParams) ([]byte, error) {
+	if err := C.save_to_buffer(&params); err != 0 {
+		return nil, handleSaveBufferError(params.outputBuffer)
+	}
+
+	buf := C.GoBytes(params.outputBuffer, C.int(params.outputLen))
+	defer gFreePointer(params.outputBuffer)
+
+	return buf, nil
 }
