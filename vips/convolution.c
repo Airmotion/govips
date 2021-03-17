@@ -4,6 +4,6 @@ int gaussian_blur_image(VipsImage *in, VipsImage **out, double sigma, int precis
 	return vips_gaussblur(in, out, sigma, "precision", precision, NULL);
 }
 
-int sharpen_image(VipsImage *in, VipsImage **out, double sigma, double x1, double m2, VipsSharpenMode mode) {
+int sharpen_image(VipsImage *in, VipsImage **out, double sigma, double x1, double m2) {
 	return vips_sharpen(in, out, "sigma", sigma, "x1", x1, "m2", m2, "mode", mode, NULL);
 }
